@@ -1,0 +1,191 @@
+openapi: 3.0.3
+info:
+  title: Flobase Vintage Import API
+  version: 1.0.0
+  description: Async CSV import pipeline with WAF bypass
+
+servers:
+  - url: https://fxzma34u7a.execute-api.us-east-1.amazonaws.com/Prod
+
+paths:
+  /vintages/import-url:
+    get:
+      summary: Get presigned S3 URL for large CSV uploads
+      operationId: getImportUrl
+      tags: [Imports]
+      security:
+        - BearerAuth: []
+      responses:
+        200:
+          description: Presigned URL generated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  upload_url:
+                    type: string
+                    format: uri
+                    example: https://flobase-dashboard-prod.s3.us-east-1.amazonaws.com/imports/xxx.csv?X-Amz-...
+                  s3_key:
+                    type: string
+                    example: imports/abc-123.csv
+                  expires_in:
+                    type: integer
+                    example: 300
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
+
+  /vintages/import:
+    post:
+      summary: Trigger import processing (S3 key or base64 for small files)
+      operationId: importVintageCSV
+      tags: [Imports]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                dsc_id:
+                  type: string
+                vintage_name:
+                  type: string
+                purchase_date:
+                  type: string
+                  format: date
+                purchase_price:
+                  type: number
+                advance_rate_pct:
+                  type: number
+                source:
+                  type: string
+                  enum: [forth_snowflake, manual]
+                s3_key:
+                  type: string
+                  description: S3 key from presigned URL upload (large files)
+                file_content:
+                  type: string
+                  description: Base64-encoded CSV (small files <10KB only)
+              required:
+                - dsc_id
+                - vintage_name
+                - purchase_date
+                - purchase_price
+                - advance_rate_pct
+      responses:
+        200:
+          description: Import started successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  import_id:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                    enum: [processing, completed, failed]
+                  account_count:
+                    type: integer
+                  inserted:
+                    type: integer
+                  updated:
+                    type: integer
+        400:
+          $ref: '#/components/responses/BadRequest'
+        401:
+          $ref: '#/components/responses/Unauthorized'
+        403:
+          $ref: '#/components/responses/Forbidden'
+
+  /vintages/import-status/{import_id}:
+    get:
+      summary: Check import processing status
+      operationId: getImportStatus
+      tags: [Imports]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: import_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        200:
+          description: Import status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  import_id:
+                    type: string
+                  status:
+                    type: string
+                    enum: [queued, processing, completed, failed]
+                  progress:
+                    type: integer
+                    minimum: 0
+                    maximum: 100
+                  error:
+                    type: string
+                    nullable: true
+                  completed_at:
+                    type: string
+                    format: date-time
+                    nullable: true
+        404:
+          description: Import ID not found
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Invalid or expired JWT
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Access denied (WAF, IAM, or role)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        code:
+          type: string
+          example: IMPORT_FAILED
+        message:
+          type: string
+          example: CSV parse error
+        details:
+          type: string
+          example: Row 42: invalid date format
+        retryable:
+          type: boolean
+          example: false

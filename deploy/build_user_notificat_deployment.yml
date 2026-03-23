@@ -1,0 +1,110 @@
+dockerfile
+# Stage 1: Build
+FROM node:18-alpine AS builder
+
+WORKDIR /usr/src/app
+
+# Install dependencies for build
+COPY package*.json ./
+RUN npm ci
+
+# Copy source code and compile TypeScript
+COPY . .
+RUN npm run build
+
+# Stage 2: Run
+FROM node:18-alpine AS runner
+
+WORKDIR /usr/src/app
+
+ENV NODE_ENV=production
+
+# Install tini for proper signal handling
+RUN apk add --no-cache tini
+
+# Copy package info and install production dependencies
+COPY package*.json ./
+RUN npm ci --omit=dev
+
+# Copy compiled code from builder
+COPY --from=builder /usr/src/app/dist ./dist
+
+# Create non-root user for security
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nodejs -u 1001
+
+# Change ownership and switch user
+RUN chown -R nodejs:nodejs /usr/src/app
+USER nodejs
+
+# Expose application port
+EXPOSE 3000
+
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+
+# Entry point and command
+ENTRYPOINT ["/sbin/tini", "--"]
+CMD ["node", "dist/index.js"]
+
+yaml
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: notification-service
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - backend-net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: notification-db
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: secret_password_change_in_prod
+      POSTGRES_DB: notifications_db
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - backend-net
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: notification-cache
+    volumes:
+      - redisdata:/data
+    networks:
+      - backend-net
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+
+volumes:
+  pgdata:
+  redisdata:
+
+networks:
+  backend-net:
+    driver: bridge

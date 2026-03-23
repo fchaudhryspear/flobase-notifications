@@ -1,0 +1,16 @@
+{
+  "name": "simon-telegram-bot",
+  "version": "1.0.0",
+  "description": "Simon Backend Engineer Telegram Bot",
+  "main": "simon-bot.js",
+  "scripts": {
+    "start": "node simon-bot.js",
+    "dev": "node --watch simon-bot.js"
+  },
+  "dependencies": {
+    "node-telegram-bot-api": "^0.64.0",
+    "axios": "^1.6.0"
+  },
+  "author": "Faisal C",
+  "license": "MIT"
+}
